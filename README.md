@@ -241,4 +241,52 @@ Working hours use the SQLite convention for `day_of_week`: `0` is Sunday and `6`
 
 ## 10. How I used AI
 
+Short version: I used AI as an implementation assistant and as a second pair of eyes. The design, the schema and the component boundaries are my own work — they were written before I used an AI tool, and they drove everything that followed.
 
+### 1. What did you use AI for across the four sections?
+
+Across the four areas of the workflow, AI wrote the implementation. I wrote the rules it implements.
+
+| Area | AI produced | I decided |
+|---|---|---|
+| Availability | Slot generation from working hours, reconciliation of the `slots` table, the availability query and its tests | That working hours are the source of truth, that slots are materialised on demand, and that the endpoint hides slots inside the lead time |
+| Booking | The transaction, the validation calls and the tests | That the request is identified by doctor + date + start time, and that booking flips the slot inside the same transaction |
+| Cancellation | The update, the slot release and the tests | That a reason is mandatory, that a second cancellation is a conflict, and that the slot has to become bookable again |
+| Rescheduling | The move, the validation of the new slot and the tests | That the new slot is validated exactly like a fresh booking and that the appointment keeps its id |
+
+Not delegated at all: the data model, the shared `doctor_working_hours` junction table, sqlc as the query layer, the error taxonomy, and dropping auth.
+
+### 2. Give one example where an AI suggestion improved your work. What did you prompt it with?
+
+**Prompt:** *"The slot must become bookable again after a cancellation. Here is my schema: `bookings.slot_id INTEGER NOT NULL UNIQUE`."*
+
+**Suggestion:** the table-level `UNIQUE` is the blocker, because the cancelled row keeps the slot claimed forever. Replace it with a partial unique index:
+
+```sql
+CREATE UNIQUE INDEX idx_bookings_confirmed_slot
+  ON bookings(slot_id) WHERE status = 'CONFIRMED';
+```
+
+**Why it was better:** enforcing "one booking per slot" in Go, inside a transaction, still leaves a window between two concurrent requests. Moving the guarantee into a partial index closes that window in the database, keeps cancelled bookings as history, and still lets a cancelled slot be booked again. I kept it and wrote two tests for it: a second active booking on a slot is rejected, and a cancelled slot can be booked again.
+
+### 3. Give one example where AI output was wrong or incomplete and how you caught it
+
+**Wrong:** the check for a duplicate booking against SQLite's error code.
+
+```go
+// AI produced this
+if sqliteErr.Code == sqlite3.ErrConstraintUnique { ... }
+```
+
+It does not compile: `Error.Code` is `ErrNo`, while `ErrConstraintUnique` is an `ErrNoExtended`. `go vet` rejected it. The fix was to compare `ExtendedCode`, and I added a test that moves a second appointment onto a taken slot and asserts the error is recognised as a constraint violation rather than surfacing as a 500.
+
+**Other things I had to correct:**
+
+- sqlc generated `Datetime interface{}` for the cutoff parameter of the upcoming-appointments query — untyped and unusable. I reproduced the variants in a scratch project, compared them, and settled on the string comparison sqlc names `Date string`, documented in `sqlc/query.sql` so the next reader is not confused by the name.
+- A test I had written expected `422` for a malformed date. The service returned `400`, which is the right answer: a malformed date is not a broken business rule. The failing test corrected my assumption, not the code.
+
+### 4. Name two decisions you made without AI. Why did you trust your own judgment there?
+
+**A junction table for working hours.** I put the schedule in its own table and linked it to doctors, instead of putting `day_of_week` and `start_time` columns on `doctors`. Five doctors who share the same weekday timetable should not mean five copies of it, and a doctor with a split shift needs two rows. I trusted this because the duplication would be permanent while the join cost is one extra query on a table with a handful of rows.
+
+**sqlc, with hand-written SQL as the source of truth.** Queries live in `sqlc/query.sql`, `database/` is generated and must never be edited by hand. I trusted this because the queries stay reviewable as SQL and the result types are checked at compile time, with no runtime mapping layer to get wrong. The cost — a generated directory that must not be touched — I documented in the README and enforced by committing the generated code instead of ignoring it.
