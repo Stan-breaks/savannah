@@ -7,59 +7,291 @@ package database
 
 import (
 	"context"
+	"database/sql"
 )
 
-const createUser = `-- name: CreateUser :one
-INSERT INTO users (email, password)
+const assignWorkingHoursToDoctor = `-- name: AssignWorkingHoursToDoctor :exec
+
+INSERT INTO doctor_working_hours (
+    doctor_id,
+    working_hours_id
+)
 VALUES (?, ?)
-RETURNING id, email, password, created_at
+ON CONFLICT (doctor_id, working_hours_id) DO NOTHING
 `
 
-type CreateUserParams struct {
-	Email    string
-	Password string
+type AssignWorkingHoursToDoctorParams struct {
+	DoctorID       int64
+	WorkingHoursID int64
 }
 
-func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
-	row := q.db.QueryRowContext(ctx, createUser, arg.Email, arg.Password)
-	var i User
+// DOCTOR-WORKING-HOURS RELATIONSHIP
+func (q *Queries) AssignWorkingHoursToDoctor(ctx context.Context, arg AssignWorkingHoursToDoctorParams) error {
+	_, err := q.db.ExecContext(ctx, assignWorkingHoursToDoctor, arg.DoctorID, arg.WorkingHoursID)
+	return err
+}
+
+const cancelBooking = `-- name: CancelBooking :execrows
+UPDATE bookings
+SET status = 'CANCELLED'
+WHERE id = ?
+  AND patient_id = ?
+  AND status = 'CONFIRMED'
+`
+
+type CancelBookingParams struct {
+	ID        int64
+	PatientID int64
+}
+
+func (q *Queries) CancelBooking(ctx context.Context, arg CancelBookingParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, cancelBooking, arg.ID, arg.PatientID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const createBooking = `-- name: CreateBooking :one
+
+INSERT INTO bookings (
+    status,
+    slot_id,
+    patient_id
+)
+SELECT
+    'CONFIRMED',
+    s.id,
+    ?
+FROM slots s
+WHERE s.id = ?
+  AND s.is_available = 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bookings b
+      WHERE b.slot_id = s.id
+        AND b.status = 'CONFIRMED'
+  )
+RETURNING id, status, slot_id, patient_id
+`
+
+type CreateBookingParams struct {
+	PatientID int64
+	ID        int64
+}
+
+// BOOKINGS
+func (q *Queries) CreateBooking(ctx context.Context, arg CreateBookingParams) (Booking, error) {
+	row := q.db.QueryRowContext(ctx, createBooking, arg.PatientID, arg.ID)
+	var i Booking
 	err := row.Scan(
 		&i.ID,
-		&i.Email,
-		&i.Password,
-		&i.CreatedAt,
+		&i.Status,
+		&i.SlotID,
+		&i.PatientID,
 	)
 	return i, err
 }
 
-const deleteUser = `-- name: DeleteUser :exec
-DELETE FROM users
+const createDoctor = `-- name: CreateDoctor :one
+
+INSERT INTO doctors (name)
+VALUES (?)
+RETURNING id, name
+`
+
+// DOCTORS
+func (q *Queries) CreateDoctor(ctx context.Context, name string) (Doctor, error) {
+	row := q.db.QueryRowContext(ctx, createDoctor, name)
+	var i Doctor
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const createPatient = `-- name: CreatePatient :one
+
+INSERT INTO patients (name)
+VALUES (?)
+RETURNING id, name
+`
+
+// PATIENTS
+func (q *Queries) CreatePatient(ctx context.Context, name string) (Patient, error) {
+	row := q.db.QueryRowContext(ctx, createPatient, name)
+	var i Patient
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const createSlot = `-- name: CreateSlot :one
+
+INSERT INTO slots (
+    start_time,
+    end_time,
+    date,
+    is_available,
+    doctor_id
+)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id, start_time, end_time, date, is_available, doctor_id
+`
+
+type CreateSlotParams struct {
+	StartTime   string
+	EndTime     string
+	Date        string
+	IsAvailable int64
+	DoctorID    int64
+}
+
+// SLOTS
+func (q *Queries) CreateSlot(ctx context.Context, arg CreateSlotParams) (Slot, error) {
+	row := q.db.QueryRowContext(ctx, createSlot,
+		arg.StartTime,
+		arg.EndTime,
+		arg.Date,
+		arg.IsAvailable,
+		arg.DoctorID,
+	)
+	var i Slot
+	err := row.Scan(
+		&i.ID,
+		&i.StartTime,
+		&i.EndTime,
+		&i.Date,
+		&i.IsAvailable,
+		&i.DoctorID,
+	)
+	return i, err
+}
+
+const createWorkingHours = `-- name: CreateWorkingHours :one
+
+INSERT INTO working_hours (
+    day_of_week,
+    start_time,
+    end_time,
+    lunch_start,
+    lunch_end
+)
+VALUES (?, ?, ?, ?, ?)
+RETURNING id, day_of_week, start_time, end_time, lunch_start, lunch_end
+`
+
+type CreateWorkingHoursParams struct {
+	DayOfWeek  int64
+	StartTime  string
+	EndTime    string
+	LunchStart sql.NullString
+	LunchEnd   sql.NullString
+}
+
+// WORKING HOURS
+func (q *Queries) CreateWorkingHours(ctx context.Context, arg CreateWorkingHoursParams) (WorkingHour, error) {
+	row := q.db.QueryRowContext(ctx, createWorkingHours,
+		arg.DayOfWeek,
+		arg.StartTime,
+		arg.EndTime,
+		arg.LunchStart,
+		arg.LunchEnd,
+	)
+	var i WorkingHour
+	err := row.Scan(
+		&i.ID,
+		&i.DayOfWeek,
+		&i.StartTime,
+		&i.EndTime,
+		&i.LunchStart,
+		&i.LunchEnd,
+	)
+	return i, err
+}
+
+const deleteDoctor = `-- name: DeleteDoctor :exec
+DELETE FROM doctors
 WHERE id = ?
 `
 
-func (q *Queries) DeleteUser(ctx context.Context, id int64) error {
-	_, err := q.db.ExecContext(ctx, deleteUser, id)
+func (q *Queries) DeleteDoctor(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteDoctor, id)
 	return err
 }
 
-const getAllUsers = `-- name: GetAllUsers :many
-SELECT id, email, password, created_at FROM users
+const deletePatient = `-- name: DeletePatient :exec
+DELETE FROM patients
+WHERE id = ?
 `
 
-func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.db.QueryContext(ctx, getAllUsers)
+func (q *Queries) DeletePatient(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deletePatient, id)
+	return err
+}
+
+const deleteSlot = `-- name: DeleteSlot :exec
+DELETE FROM slots
+WHERE id = ?
+`
+
+func (q *Queries) DeleteSlot(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteSlot, id)
+	return err
+}
+
+const deleteWorkingHours = `-- name: DeleteWorkingHours :exec
+DELETE FROM working_hours
+WHERE id = ?
+`
+
+func (q *Queries) DeleteWorkingHours(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteWorkingHours, id)
+	return err
+}
+
+const getAllBookings = `-- name: GetAllBookings :many
+SELECT
+    b.id, b.status, b.slot_id, b.patient_id,
+    p.name AS patient_name,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time
+FROM bookings b
+JOIN patients p ON p.id = b.patient_id
+JOIN slots s ON s.id = b.slot_id
+ORDER BY s.date DESC, s.start_time DESC
+`
+
+type GetAllBookingsRow struct {
+	ID          int64
+	Status      string
+	SlotID      int64
+	PatientID   int64
+	PatientName string
+	DoctorID    int64
+	Date        string
+	StartTime   string
+	EndTime     string
+}
+
+func (q *Queries) GetAllBookings(ctx context.Context) ([]GetAllBookingsRow, error) {
+	rows, err := q.db.QueryContext(ctx, getAllBookings)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []User
+	var items []GetAllBookingsRow
 	for rows.Next() {
-		var i User
+		var i GetAllBookingsRow
 		if err := rows.Scan(
 			&i.ID,
-			&i.Email,
-			&i.Password,
-			&i.CreatedAt,
+			&i.Status,
+			&i.SlotID,
+			&i.PatientID,
+			&i.PatientName,
+			&i.DoctorID,
+			&i.Date,
+			&i.StartTime,
+			&i.EndTime,
 		); err != nil {
 			return nil, err
 		}
@@ -74,36 +306,563 @@ func (q *Queries) GetAllUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, password, created_at FROM users
-WHERE email = ? LIMIT 1
+const getAllDoctors = `-- name: GetAllDoctors :many
+SELECT id, name FROM doctors
+ORDER BY name
 `
 
-func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserByEmail, email)
-	var i User
+func (q *Queries) GetAllDoctors(ctx context.Context) ([]Doctor, error) {
+	rows, err := q.db.QueryContext(ctx, getAllDoctors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Doctor
+	for rows.Next() {
+		var i Doctor
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllPatients = `-- name: GetAllPatients :many
+SELECT id, name FROM patients
+ORDER BY name
+`
+
+func (q *Queries) GetAllPatients(ctx context.Context) ([]Patient, error) {
+	rows, err := q.db.QueryContext(ctx, getAllPatients)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Patient
+	for rows.Next() {
+		var i Patient
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAllWorkingHours = `-- name: GetAllWorkingHours :many
+SELECT id, day_of_week, start_time, end_time, lunch_start, lunch_end FROM working_hours
+ORDER BY day_of_week, start_time
+`
+
+func (q *Queries) GetAllWorkingHours(ctx context.Context) ([]WorkingHour, error) {
+	rows, err := q.db.QueryContext(ctx, getAllWorkingHours)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkingHour
+	for rows.Next() {
+		var i WorkingHour
+		if err := rows.Scan(
+			&i.ID,
+			&i.DayOfWeek,
+			&i.StartTime,
+			&i.EndTime,
+			&i.LunchStart,
+			&i.LunchEnd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAvailableSlotsByDate = `-- name: GetAvailableSlotsByDate :many
+SELECT s.id, s.start_time, s.end_time, s.date, s.is_available, s.doctor_id
+FROM slots s
+WHERE s.date = ?
+  AND s.is_available = 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bookings b
+      WHERE b.slot_id = s.id
+        AND b.status = 'CONFIRMED'
+  )
+ORDER BY s.start_time
+`
+
+func (q *Queries) GetAvailableSlotsByDate(ctx context.Context, date string) ([]Slot, error) {
+	rows, err := q.db.QueryContext(ctx, getAvailableSlotsByDate, date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Slot
+	for rows.Next() {
+		var i Slot
+		if err := rows.Scan(
+			&i.ID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Date,
+			&i.IsAvailable,
+			&i.DoctorID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getAvailableSlotsByDoctorAndDate = `-- name: GetAvailableSlotsByDoctorAndDate :many
+SELECT s.id, s.start_time, s.end_time, s.date, s.is_available, s.doctor_id
+FROM slots s
+WHERE s.doctor_id = ?
+  AND s.date = ?
+  AND s.is_available = 1
+  AND NOT EXISTS (
+      SELECT 1
+      FROM bookings b
+      WHERE b.slot_id = s.id
+        AND b.status = 'CONFIRMED'
+  )
+ORDER BY s.start_time
+`
+
+type GetAvailableSlotsByDoctorAndDateParams struct {
+	DoctorID int64
+	Date     string
+}
+
+func (q *Queries) GetAvailableSlotsByDoctorAndDate(ctx context.Context, arg GetAvailableSlotsByDoctorAndDateParams) ([]Slot, error) {
+	rows, err := q.db.QueryContext(ctx, getAvailableSlotsByDoctorAndDate, arg.DoctorID, arg.Date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Slot
+	for rows.Next() {
+		var i Slot
+		if err := rows.Scan(
+			&i.ID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Date,
+			&i.IsAvailable,
+			&i.DoctorID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBookingById = `-- name: GetBookingById :one
+SELECT id, status, slot_id, patient_id FROM bookings
+WHERE id = ? LIMIT 1
+`
+
+func (q *Queries) GetBookingById(ctx context.Context, id int64) (Booking, error) {
+	row := q.db.QueryRowContext(ctx, getBookingById, id)
+	var i Booking
 	err := row.Scan(
 		&i.ID,
-		&i.Email,
-		&i.Password,
-		&i.CreatedAt,
+		&i.Status,
+		&i.SlotID,
+		&i.PatientID,
 	)
 	return i, err
 }
 
-const getUserById = `-- name: GetUserById :one
-SELECT id, email, password, created_at FROM users
+const getBookingBySlotId = `-- name: GetBookingBySlotId :one
+SELECT id, status, slot_id, patient_id FROM bookings
+WHERE slot_id = ?
+  AND status = 'CONFIRMED'
+LIMIT 1
+`
+
+func (q *Queries) GetBookingBySlotId(ctx context.Context, slotID int64) (Booking, error) {
+	row := q.db.QueryRowContext(ctx, getBookingBySlotId, slotID)
+	var i Booking
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.SlotID,
+		&i.PatientID,
+	)
+	return i, err
+}
+
+const getBookingsByDoctorAndDate = `-- name: GetBookingsByDoctorAndDate :many
+SELECT
+    b.id, b.status, b.slot_id, b.patient_id,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time,
+    p.name AS patient_name
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+JOIN patients p ON p.id = b.patient_id
+WHERE s.doctor_id = ?
+  AND s.date = ?
+  AND b.status = 'CONFIRMED'
+ORDER BY s.start_time
+`
+
+type GetBookingsByDoctorAndDateParams struct {
+	DoctorID int64
+	Date     string
+}
+
+type GetBookingsByDoctorAndDateRow struct {
+	ID          int64
+	Status      string
+	SlotID      int64
+	PatientID   int64
+	DoctorID    int64
+	Date        string
+	StartTime   string
+	EndTime     string
+	PatientName string
+}
+
+func (q *Queries) GetBookingsByDoctorAndDate(ctx context.Context, arg GetBookingsByDoctorAndDateParams) ([]GetBookingsByDoctorAndDateRow, error) {
+	rows, err := q.db.QueryContext(ctx, getBookingsByDoctorAndDate, arg.DoctorID, arg.Date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetBookingsByDoctorAndDateRow
+	for rows.Next() {
+		var i GetBookingsByDoctorAndDateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.SlotID,
+			&i.PatientID,
+			&i.DoctorID,
+			&i.Date,
+			&i.StartTime,
+			&i.EndTime,
+			&i.PatientName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBookingsByPatient = `-- name: GetBookingsByPatient :many
+SELECT
+    b.id, b.status, b.slot_id, b.patient_id,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+WHERE b.patient_id = ?
+ORDER BY s.date DESC, s.start_time DESC
+`
+
+type GetBookingsByPatientRow struct {
+	ID        int64
+	Status    string
+	SlotID    int64
+	PatientID int64
+	DoctorID  int64
+	Date      string
+	StartTime string
+	EndTime   string
+}
+
+func (q *Queries) GetBookingsByPatient(ctx context.Context, patientID int64) ([]GetBookingsByPatientRow, error) {
+	rows, err := q.db.QueryContext(ctx, getBookingsByPatient, patientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetBookingsByPatientRow
+	for rows.Next() {
+		var i GetBookingsByPatientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.SlotID,
+			&i.PatientID,
+			&i.DoctorID,
+			&i.Date,
+			&i.StartTime,
+			&i.EndTime,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDoctorById = `-- name: GetDoctorById :one
+SELECT id, name FROM doctors
 WHERE id = ? LIMIT 1
 `
 
-func (q *Queries) GetUserById(ctx context.Context, id int64) (User, error) {
-	row := q.db.QueryRowContext(ctx, getUserById, id)
-	var i User
+func (q *Queries) GetDoctorById(ctx context.Context, id int64) (Doctor, error) {
+	row := q.db.QueryRowContext(ctx, getDoctorById, id)
+	var i Doctor
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const getPatientById = `-- name: GetPatientById :one
+SELECT id, name FROM patients
+WHERE id = ? LIMIT 1
+`
+
+func (q *Queries) GetPatientById(ctx context.Context, id int64) (Patient, error) {
+	row := q.db.QueryRowContext(ctx, getPatientById, id)
+	var i Patient
+	err := row.Scan(&i.ID, &i.Name)
+	return i, err
+}
+
+const getSlotById = `-- name: GetSlotById :one
+SELECT id, start_time, end_time, date, is_available, doctor_id FROM slots
+WHERE id = ? LIMIT 1
+`
+
+func (q *Queries) GetSlotById(ctx context.Context, id int64) (Slot, error) {
+	row := q.db.QueryRowContext(ctx, getSlotById, id)
+	var i Slot
 	err := row.Scan(
 		&i.ID,
-		&i.Email,
-		&i.Password,
-		&i.CreatedAt,
+		&i.StartTime,
+		&i.EndTime,
+		&i.Date,
+		&i.IsAvailable,
+		&i.DoctorID,
+	)
+	return i, err
+}
+
+const getSlotsByDoctorAndDate = `-- name: GetSlotsByDoctorAndDate :many
+SELECT id, start_time, end_time, date, is_available, doctor_id
+FROM slots
+WHERE doctor_id = ?
+  AND date = ?
+ORDER BY start_time
+`
+
+type GetSlotsByDoctorAndDateParams struct {
+	DoctorID int64
+	Date     string
+}
+
+func (q *Queries) GetSlotsByDoctorAndDate(ctx context.Context, arg GetSlotsByDoctorAndDateParams) ([]Slot, error) {
+	rows, err := q.db.QueryContext(ctx, getSlotsByDoctorAndDate, arg.DoctorID, arg.Date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Slot
+	for rows.Next() {
+		var i Slot
+		if err := rows.Scan(
+			&i.ID,
+			&i.StartTime,
+			&i.EndTime,
+			&i.Date,
+			&i.IsAvailable,
+			&i.DoctorID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWorkingHoursByDoctor = `-- name: GetWorkingHoursByDoctor :many
+SELECT wh.id, wh.day_of_week, wh.start_time, wh.end_time, wh.lunch_start, wh.lunch_end
+FROM working_hours wh
+JOIN doctor_working_hours dwh
+    ON dwh.working_hours_id = wh.id
+WHERE dwh.doctor_id = ?
+ORDER BY wh.day_of_week, wh.start_time
+`
+
+func (q *Queries) GetWorkingHoursByDoctor(ctx context.Context, doctorID int64) ([]WorkingHour, error) {
+	rows, err := q.db.QueryContext(ctx, getWorkingHoursByDoctor, doctorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkingHour
+	for rows.Next() {
+		var i WorkingHour
+		if err := rows.Scan(
+			&i.ID,
+			&i.DayOfWeek,
+			&i.StartTime,
+			&i.EndTime,
+			&i.LunchStart,
+			&i.LunchEnd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWorkingHoursById = `-- name: GetWorkingHoursById :one
+SELECT id, day_of_week, start_time, end_time, lunch_start, lunch_end FROM working_hours
+WHERE id = ? LIMIT 1
+`
+
+func (q *Queries) GetWorkingHoursById(ctx context.Context, id int64) (WorkingHour, error) {
+	row := q.db.QueryRowContext(ctx, getWorkingHoursById, id)
+	var i WorkingHour
+	err := row.Scan(
+		&i.ID,
+		&i.DayOfWeek,
+		&i.StartTime,
+		&i.EndTime,
+		&i.LunchStart,
+		&i.LunchEnd,
+	)
+	return i, err
+}
+
+const removeWorkingHoursFromDoctor = `-- name: RemoveWorkingHoursFromDoctor :exec
+DELETE FROM doctor_working_hours
+WHERE doctor_id = ?
+  AND working_hours_id = ?
+`
+
+type RemoveWorkingHoursFromDoctorParams struct {
+	DoctorID       int64
+	WorkingHoursID int64
+}
+
+func (q *Queries) RemoveWorkingHoursFromDoctor(ctx context.Context, arg RemoveWorkingHoursFromDoctorParams) error {
+	_, err := q.db.ExecContext(ctx, removeWorkingHoursFromDoctor, arg.DoctorID, arg.WorkingHoursID)
+	return err
+}
+
+const updateSlotAvailability = `-- name: UpdateSlotAvailability :exec
+UPDATE slots
+SET is_available = ?
+WHERE id = ?
+`
+
+type UpdateSlotAvailabilityParams struct {
+	IsAvailable int64
+	ID          int64
+}
+
+func (q *Queries) UpdateSlotAvailability(ctx context.Context, arg UpdateSlotAvailabilityParams) error {
+	_, err := q.db.ExecContext(ctx, updateSlotAvailability, arg.IsAvailable, arg.ID)
+	return err
+}
+
+const updateWorkingHours = `-- name: UpdateWorkingHours :one
+UPDATE working_hours
+SET day_of_week = ?,
+    start_time = ?,
+    end_time = ?,
+    lunch_start = ?,
+    lunch_end = ?
+WHERE id = ?
+RETURNING id, day_of_week, start_time, end_time, lunch_start, lunch_end
+`
+
+type UpdateWorkingHoursParams struct {
+	DayOfWeek  int64
+	StartTime  string
+	EndTime    string
+	LunchStart sql.NullString
+	LunchEnd   sql.NullString
+	ID         int64
+}
+
+func (q *Queries) UpdateWorkingHours(ctx context.Context, arg UpdateWorkingHoursParams) (WorkingHour, error) {
+	row := q.db.QueryRowContext(ctx, updateWorkingHours,
+		arg.DayOfWeek,
+		arg.StartTime,
+		arg.EndTime,
+		arg.LunchStart,
+		arg.LunchEnd,
+		arg.ID,
+	)
+	var i WorkingHour
+	err := row.Scan(
+		&i.ID,
+		&i.DayOfWeek,
+		&i.StartTime,
+		&i.EndTime,
+		&i.LunchStart,
+		&i.LunchEnd,
 	)
 	return i, err
 }

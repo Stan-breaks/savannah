@@ -8,9 +8,42 @@ import (
 	"database/sql"
 )
 
-type User struct {
+type Booking struct {
 	ID        int64
-	Email     string
-	Password  string
-	CreatedAt sql.NullTime
+	Status    string
+	SlotID    int64
+	PatientID int64
+}
+
+type Doctor struct {
+	ID   int64
+	Name string
+}
+
+type DoctorWorkingHour struct {
+	DoctorID       int64
+	WorkingHoursID int64
+}
+
+type Patient struct {
+	ID   int64
+	Name string
+}
+
+type Slot struct {
+	ID          int64
+	StartTime   string
+	EndTime     string
+	Date        string
+	IsAvailable int64
+	DoctorID    int64
+}
+
+type WorkingHour struct {
+	ID         int64
+	DayOfWeek  int64
+	StartTime  string
+	EndTime    string
+	LunchStart sql.NullString
+	LunchEnd   sql.NullString
 }
