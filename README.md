@@ -29,23 +29,35 @@ The system uses six tables, each with a specific responsibility.
 - A doctor can have multiple working-hour schedules, and a schedule can be shared by multiple doctors.
 - A doctor can have many appointment slots.
 - A patient can make multiple bookings.
-- Each slot can have at most one booking.
+- A slot can have at most one **active** booking. A cancelled booking keeps the slot's history without blocking a new booking on it (section 9).
 
 The database uses primary keys, foreign keys, and uniqueness constraints to maintain referential integrity and prevent duplicate reservations.
 
 ## 3. System Components
 
-**Application layer (Go)**
+Three layers, one responsibility each. The HTTP layer knows about status codes, the service layer knows about clinic rules, the data layer knows about SQL. Nothing below the HTTP layer imports `net/http`, so every rule is testable without starting a server.
 
-Handles incoming requests, validates input, applies business rules, and coordinates database operations. It is responsible for checking that appointments fall within working hours, avoid lunch breaks, and are available before booking.
+**HTTP layer (`router/`)**
 
-**Database layer (SQLite + sqlc)**
+Routes the request, validates the *shape* of the JSON body, and translates the outcome into a response. The error taxonomy lives here: the service reports *what* went wrong as a typed error, this layer decides the status code (section 7).
 
-SQLite stores the application data, while sqlc generates type-safe Go methods from SQL queries. This keeps database access explicit and reduces errors caused by manually mapping query results.
+**Service layer (`service/`)**
+
+Holds the clinic rules: deriving slots from working hours, deciding whether a requested time is bookable, and running booking, cancellation and rescheduling as atomic transactions. It owns the clock and the timezone, both injectable, so the time-sensitive rules are testable.
+
+**Data access layer (`database/`, generated)**
+
+sqlc turns the queries in `sqlc/query.sql` into type-safe Go methods. `database/` is generated and never edited by hand; the SQL files are the source of truth.
 
 **Availability component**
 
-Retrieves the slots for a selected doctor and date and identifies which ones remain available for booking. Only slots that are available and have no active booking should be offered to patients.
+The part of the design that deserves its own mention, because it answers "which slots can this patient book?":
+
+1. The doctor's working hours for that weekday are turned into the 30-minute slots of the date, with lunch breaks carved out.
+2. The `slots` table is reconciled with that schedule, so the table is a faithful picture of what exists.
+3. The slots that are still free, have not started, and respect the one-hour lead time are returned.
+
+Steps 1 and 2 make the schedule the single source of truth; step 3 is a plain read of the `slots` table.
 
 ## 4. Booking Workflow
 
@@ -54,9 +66,10 @@ Retrieves the slots for a selected doctor and date and identifies which ones rem
 3. **Display available slots:** The application excludes unavailable or already-booked slots.
 4. **Create a booking:** The application rechecks availability and records the booking within a database transaction.
 5. **Confirm the appointment:** The selected slot becomes unavailable to other patients.
-6. **Cancel a booking:** The booking status changes to `CANCELLED`, and the slot becomes available again.
+6. **Cancel a booking:** The booking status changes to `CANCELLED`, the reason is recorded, and the slot becomes available again.
+7. **Reschedule a booking:** The appointment moves to another slot. The old slot is released, the new one is validated exactly like a fresh booking, and the appointment keeps its id.
 
-Booking and cancellation operations must be atomic to avoid inconsistent states or two patients reserving the same slot concurrently.
+Booking, cancellation and rescheduling must be atomic to avoid inconsistent states or two patients reserving the same slot concurrently.
 
 ## 5. Key Design Decisions
 
@@ -85,6 +98,26 @@ A unique constraint on `bookings.slot_id` prevents multiple booking records from
 Go handles validation of appointment duration, working hours, lunch breaks, booking status, and cancellation rules. SQLite retains essential integrity constraints, such as foreign keys and uniqueness.
 
 This keeps business logic easier to test and maintain while ensuring the database protects critical relationships.
+
+### The schedule is the source of truth
+
+Slots are not maintained by hand; they are derived from a doctor's working hours. A schedule change therefore cannot leave stale bookable slots behind, and the 30-minute grid is defined once, anchored at the start of a shift.
+
+The trade-off is that the `slots` table has to be reconciled whenever a schedule is consulted, which makes the availability endpoint a read that occasionally writes. I accepted that because offering the right slots matters more than keeping the endpoint side-effect free, and the write is a handful of idempotent inserts.
+
+### Booking by doctor, date and start time
+
+A booking request names a doctor, a date and a start time rather than a slot id; the service resolves that to a slot row itself.
+
+The trade-off is one extra lookup per request, in exchange for a client that can book a slot it never fetched, and for bookings that survive a rebuild of the `slots` table.
+
+### Errors carry a machine readable code
+
+Every failure has a status code, a stable code, and a message that says what to do about it. `422` means a well-formed request that breaks a rule, `400` means a request that is malformed. That keeps "your slot is outside working hours" distinguishable from "your date is not a date".
+
+### No authentication
+
+There is no auth layer, so endpoints are scoped by the ids in the path and in the body, and anyone who knows a doctor id can book with them. In a real deployment the patient identity would come from the session and `CancelBooking` would be scoped by `patient_id` as well. That query was scoped that way originally; removing it was a one-line change.
 
 ## 6. Running it
 
@@ -187,9 +220,13 @@ service/           the booking rules, independent of HTTP
   slots.go           deriving and validating slots from working hours
   slotstore.go       keeping the slots table in line with the schedule
   appointments.go    booking, cancelling, rescheduling, availability
+  errors.go          typed failures, mapped to status codes by the router
+  policy.go          the one-hour booking lead time
+  *_test.go          the rules, tested against a real SQLite file
 router/            the HTTP layer
   apis/              one file per resource, shared JSON helpers
-sqlc/              the schema and the queries, the source of truth
+  router_test.go     the endpoints, tested for status codes and bodies
+sqlc/              schema.sql, query.sql and seed.sql, the source of truth
 database/          generated by sqlc, do not edit
 ```
 
@@ -201,4 +238,7 @@ Two things in the original schema did not allow the required behaviour:
 - A cancellation had nowhere to be recorded, so `bookings` gained a `cancel_reason` column.
 
 Working hours use the SQLite convention for `day_of_week`: `0` is Sunday and `6` is Saturday.
+
+## 10. How I used AI
+
 
