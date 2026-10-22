@@ -129,7 +129,7 @@ func (s *Service) Book(ctx context.Context, req BookRequest) (Appointment, error
 		ID:        slot.ID,
 	})
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || isUniqueViolation(err) {
 			return Appointment{}, conflict("slot_already_booked",
 				"slot %s on %s is already booked", req.StartTime, req.Date)
 		}
