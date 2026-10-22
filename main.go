@@ -6,7 +6,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"savannah/database"
 	"savannah/router"
 	"strings"
 
@@ -69,8 +68,7 @@ func main() {
 		log.Fatalf("Error initializing schema: %v", err)
 	}
 
-	queries := database.New(db)
-	route := router.NewRouter(queries)
+	route := router.NewRouter()
 
 	log.Println("savannah server started on :8080")
 	log.Fatal(http.ListenAndServe(":8080", route.Handler()))
