@@ -20,4 +20,8 @@ git pull --ff-only
 # old one is still running.
 go build -o savannah .
 
+# An empty database gets the example clinic, so a fresh server or one
+# that lost its data answers the same way.
+bash deploy/seed.sh
+
 sudo systemctl restart savannah.service

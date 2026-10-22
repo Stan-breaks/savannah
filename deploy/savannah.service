@@ -1,0 +1,12 @@
+[Unit]
+Description=Savannah
+After=network.target
+
+[Service]
+ExecStart=/var/www/savannah/savannah
+WorkingDirectory=/var/www/savannah
+Restart=on-failure
+User=web
+
+[Install]
+WantedBy=multi-user.target
