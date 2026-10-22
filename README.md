@@ -275,7 +275,7 @@ I used AI as a pair programmer. It wrote most of the code. I wrote the schema, t
 
 For the schema, I designed the six tables myself, mainly the split between `working_hours` and `doctor_working_hours`, because a lot of the rest depends on it. I used AI afterwards to review it for missing foreign keys and columns the queries would need. It also wrote the sqlc queries, since once the schema is fixed that's mostly translation.
 
-For the service layer, I wrote the rules in plain prose first: what the slots of a shift are, what happens to a slot when its appointment is cancelled, and in what order the checks run. AI turned that into Go, including the loop that walks a shift in 30-minute steps, the lunch-break overlap check, and the transaction bodies for book, cancel and reschedule. The reconciliation in `service/slotstore.go` is the part I had to push on. The first draft inserted missing slots but never removed ones that had dropped out of a doctor's schedule, which is the exact case the "schedule is the source of truth" decision is about. [ADD: how you noticed, or what you changed.]
+For the service layer, I wrote the rules in plain prose first: what the slots of a shift are, what happens to a slot when its appointment is cancelled, and in what order the checks run. AI turned that into Go, including the loop that walks a shift in 30-minute steps, the lunch-break overlap check, and the transaction bodies for book, cancel and reschedule. The reconciliation in `service/slotstore.go` is the part I had to push on. The first draft inserted missing slots but never removed ones that had dropped out of a doctor's schedule, which is the exact case the "schedule is the source of truth" decision is about.
 
 The HTTP layer was almost all AI, since it's a direct translation of the endpoint table. The `400` versus `422` split and `DisallowUnknownFields` were my decisions. For tests, I listed what had to be true and AI wrote the bodies. The service tests use a real SQLite file in `t.TempDir()` with the real generated queries, and no fake database.
 
@@ -297,6 +297,5 @@ CREATE UNIQUE INDEX idx_bookings_confirmed_slot
 
 Two decisions were mine. First, the `slots` table is built from working hours, and the availability endpoint writes to it. The alternative was computing slots on every request and storing only bookings. I went the other way because a schedule change shouldn't leave a bookable slot behind, and the cost is a few inserts. Second, booking takes a doctor, date and start time instead of a slot id. Slots get deleted and recreated when schedules change, so a client holding a slot id can end up asking for something that no longer exists. Naming the doctor and the time is what the patient actually means.
 
-[ADD: one thing you'd do differently with more time, such as the missing auth or the write-on-read availability endpoint.]
 
 
