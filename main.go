@@ -6,70 +6,69 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"savannah/database"
 	"savannah/router"
-	"strings"
+	"savannah/service"
 
 	"github.com/joho/godotenv"
 	_ "github.com/mattn/go-sqlite3"
 )
 
-func initializeSchema(db *sql.DB) error {
-	schemaSQL, err := os.ReadFile("sqlc/schema.sql")
-	if err != nil {
-		return fmt.Errorf("failed to read schema file: %v", err)
-	}
-	tx, err := db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %v", err)
-	}
-	queries := strings.SplitSeq(string(schemaSQL), ";")
-	for query := range queries {
-		trimmed := strings.TrimSpace(query)
-		if trimmed == "" {
-			continue
-		}
-		if _, err := tx.Exec(trimmed); err != nil {
-			log.Printf("Error executing schema query: %v", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit schema: %v", err)
-	}
-
-	log.Println("Schema initialized successfully")
-	return nil
-}
+const (
+	// defaultDBPath is the SQLite file the application works with.
+	defaultDBPath = "sqlite.db"
+	// schemaPath holds the schema the database is initialised from.
+	schemaPath = "sqlc/schema.sql"
+	// listenAddress is the address the server binds to.
+	listenAddress = ":8080"
+)
 
 func main() {
 	if err := godotenv.Load(".env"); err != nil {
 		log.Println("warning: no .env file found, relying on environment variables")
 	}
-	db, err := sql.Open("sqlite3", "sqlite.db")
+
+	db, err := sql.Open("sqlite3", dsn())
 	if err != nil {
 		log.Fatalf("Error opening database: %v", err)
 	}
 	defer db.Close()
 
-	// SQLite concurrency optimizations
-	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		log.Printf("Failed to set WAL mode: %v", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON;"); err != nil {
-		log.Printf("failed to enable foreign keys: %v\n", err)
-		os.Exit(1)
-	}
-	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		log.Printf("Failed to set busy timeout: %v", err)
-	}
-	db.SetConnMaxLifetime(0)
-
 	if err := initializeSchema(db); err != nil {
 		log.Fatalf("Error initializing schema: %v", err)
 	}
 
-	route := router.NewRouter()
+	queries := database.New(db)
+	svc := service.New(db, queries)
+	route := router.NewRouter(svc)
 
-	log.Println("savannah server started on :8080")
-	log.Fatal(http.ListenAndServe(":8080", route.Handler()))
+	log.Printf("savannah server started on %s", listenAddress)
+	log.Fatal(http.ListenAndServe(listenAddress, route.Handler()))
+}
+
+// dsn builds the SQLite connection string. The pragmas are part of the DSN
+// because SQLite applies them per connection and the pool hands out more
+// than one connection.
+func dsn() string {
+	path := os.Getenv("DB_PATH")
+	if path == "" {
+		path = defaultDBPath
+	}
+	return fmt.Sprintf(
+		"file:%s?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL&_txlock=immediate",
+		path,
+	)
+}
+
+// initializeSchema applies the schema to an empty database.
+func initializeSchema(db *sql.DB) error {
+	schemaSQL, err := os.ReadFile(schemaPath)
+	if err != nil {
+		return fmt.Errorf("failed to read schema file: %w", err)
+	}
+	if _, err := db.Exec(string(schemaSQL)); err != nil {
+		return fmt.Errorf("failed to apply schema: %w", err)
+	}
+	log.Println("Schema initialized successfully")
+	return nil
 }
