@@ -511,6 +511,81 @@ func TestRescheduleRejectsASlotOutsideWorkingHours(t *testing.T) {
 	}
 }
 
+func TestRescheduleRejectsTheSlotTheAppointmentAlreadyHas(t *testing.T) {
+	svc := newTestService(t, testClock)
+	doctor, alice, _ := seedClinic(t, svc)
+	ctx := context.Background()
+
+	appointment, err := svc.Book(ctx, BookRequest{
+		PatientID: alice.ID,
+		DoctorID:  doctor.ID,
+		Date:      testDate,
+		StartTime: "11:00",
+	})
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+
+	_, err = svc.Reschedule(ctx, RescheduleRequest{
+		BookingID: appointment.ID,
+		Date:      testDate,
+		StartTime: "11:00",
+	})
+	if err == nil {
+		t.Fatal("Reschedule succeeded, want an error")
+	}
+	if got := codeOf(t, err); got != "same_slot" {
+		t.Fatalf("code = %q, want same_slot (message: %v)", got, err)
+	}
+}
+
+func TestRescheduleCanMoveAnAppointmentToAnotherDoctor(t *testing.T) {
+	svc := newTestService(t, testClock)
+	doctor, alice, _ := seedClinic(t, svc)
+	ctx := context.Background()
+
+	other := seedDoctor(t, svc, "Dr. Wilson")
+	seedWorkingHours(t, svc, other, "09:00", "17:00", "", "")
+
+	appointment, err := svc.Book(ctx, BookRequest{
+		PatientID: alice.ID,
+		DoctorID:  doctor.ID,
+		Date:      testDate,
+		StartTime: "11:00",
+	})
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+
+	moved, err := svc.Reschedule(ctx, RescheduleRequest{
+		BookingID: appointment.ID,
+		DoctorID:  other.ID,
+		Date:      testDate,
+		StartTime: "15:00",
+	})
+	if err != nil {
+		t.Fatalf("Reschedule: %v", err)
+	}
+	if moved.DoctorID != other.ID {
+		t.Errorf("doctor id = %d, want %d", moved.DoctorID, other.ID)
+	}
+	if moved.ID != appointment.ID {
+		t.Errorf("appointment id = %d, want %d", moved.ID, appointment.ID)
+	}
+
+	// the slot of the old doctor is free again
+	slots, err := svc.Availability(ctx, doctor.ID, testDate)
+	if err != nil {
+		t.Fatalf("Availability: %v", err)
+	}
+	for _, slot := range slots {
+		if slot.StartTime == "11:00" {
+			return
+		}
+	}
+	t.Fatal("the slot the appointment left is not available again")
+}
+
 func TestAvailabilityListsTheFreeSlots(t *testing.T) {
 	svc := newTestService(t, testClock)
 	doctor, alice, _ := seedClinic(t, svc)
