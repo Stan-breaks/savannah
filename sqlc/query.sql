@@ -273,6 +273,7 @@ WHERE s.doctor_id = ?
 ORDER BY b.id;
 
 -- name: GetUpcomingBookingsByPatient :many
+-- The Date parameter is the cutoff as a "YYYY-MM-DD HH:MM" timestamp.
 SELECT
     b.id,
     b.status,
