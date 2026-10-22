@@ -299,3 +299,4 @@ Two decisions were mine. First, the `slots` table is built from working hours, a
 
 [ADD: one thing you'd do differently with more time, such as the missing auth or the write-on-read availability endpoint.]
 
+
