@@ -20,7 +20,7 @@ const (
 	// schemaPath holds the schema the database is initialised from.
 	schemaPath = "sqlc/schema.sql"
 	// listenAddress is the address the server binds to.
-	listenAddress = ":8080"
+	listenAddress = ":8089"
 )
 
 func main() {

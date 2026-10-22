@@ -30,7 +30,7 @@ COPY --from=builder /app/savannah /savannah
 COPY --from=builder /app/sqlc /sqlc
 
 # Expose the port
-EXPOSE 8080
+EXPOSE 8089
 
 # Run
 ENTRYPOINT ["/savannah"]

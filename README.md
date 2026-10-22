@@ -113,7 +113,7 @@ There's no auth. Endpoints are scoped by the ids in the path and body, so anyone
 
 ```sh
 just seed   # creates sqlite.db and fills it with the example clinic
-just run    # serves the API on :8080
+just run    # serves the API on :8089
 just test   # runs the test suite
 just sqlc   # regenerates database/ from sqlc/schema.sql and sqlc/query.sql
 ```
@@ -137,7 +137,7 @@ Dates are `YYYY-MM-DD` and times are `HH:MM`, in the server's timezone.
 ### Booking an appointment
 
 ```sh
-curl -X POST http://localhost:8080/appointments \
+curl -X POST http://localhost:8089/appointments \
   -d '{"patient_id": 1, "doctor_id": 1, "date": "2026-10-24", "start_time": "10:00"}'
 ```
 
@@ -160,7 +160,7 @@ The slot has to be inside the doctor's working hours, can't overlap a lunch brea
 ### Availability
 
 ```sh
-curl "http://localhost:8080/doctors/1/availability?date=2026-10-24"
+curl "http://localhost:8089/doctors/1/availability?date=2026-10-24"
 ```
 
 ```json
@@ -178,10 +178,10 @@ Slots that already started, or start within the next hour, are left out because 
 ### Cancelling and rescheduling
 
 ```sh
-curl -X PATCH http://localhost:8080/appointments/1/cancel \
+curl -X PATCH http://localhost:8089/appointments/1/cancel \
   -d '{"reason": "patient is ill"}'
 
-curl -X PATCH http://localhost:8080/appointments/1/reschedule \
+curl -X PATCH http://localhost:8089/appointments/1/reschedule \
   -d '{"date": "2026-10-24", "start_time": "11:00"}'
 ```
 
