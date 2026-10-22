@@ -111,6 +111,17 @@ INSERT INTO slots (
 VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
+-- name: CreateSlotIgnoringConflict :exec
+INSERT INTO slots (
+    start_time,
+    end_time,
+    date,
+    is_available,
+    doctor_id
+)
+VALUES (?, ?, ?, 1, ?)
+ON CONFLICT (doctor_id, date, start_time) DO NOTHING;
+
 -- name: GetSlotById :one
 SELECT * FROM slots
 WHERE id = ? LIMIT 1;
@@ -222,10 +233,63 @@ ORDER BY s.start_time;
 
 -- name: CancelBooking :execrows
 UPDATE bookings
-SET status = 'CANCELLED'
+SET status = 'CANCELLED',
+    cancel_reason = ?
 WHERE id = ?
-  AND patient_id = ?
   AND status = 'CONFIRMED';
+
+-- name: RescheduleBooking :one
+UPDATE bookings
+SET slot_id = ?
+WHERE id = ?
+  AND status = 'CONFIRMED'
+RETURNING *;
+
+-- name: GetBookingWithSlot :one
+SELECT
+    b.id,
+    b.status,
+    b.slot_id,
+    b.patient_id,
+    b.cancel_reason,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+WHERE b.id = ?;
+
+-- name: GetBookingsWithSlotByDoctorAndDate :many
+SELECT
+    b.id,
+    b.status,
+    b.slot_id,
+    b.patient_id
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+WHERE s.doctor_id = ?
+  AND s.date = ?
+ORDER BY b.id;
+
+-- name: GetUpcomingBookingsByPatient :many
+SELECT
+    b.id,
+    b.status,
+    b.slot_id,
+    b.patient_id,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time,
+    d.name AS doctor_name
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+JOIN doctors d ON d.id = s.doctor_id
+WHERE b.patient_id = ?
+  AND b.status = 'CONFIRMED'
+  AND (s.date || ' ' || s.start_time) >= ?
+ORDER BY s.date ASC, s.start_time ASC;
 
 -- name: GetAllBookings :many
 SELECT

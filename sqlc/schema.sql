@@ -34,8 +34,14 @@ CREATE TABLE IF NOT EXISTS slots(
 CREATE TABLE IF NOT EXISTS bookings(
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   status TEXT NOT NULL DEFAULT 'CONFIRMED',
-  slot_id INTEGER NOT NULL UNIQUE,
+  slot_id INTEGER NOT NULL,
   patient_id INTEGER NOT NULL,
+  cancel_reason TEXT,
   FOREIGN KEY (slot_id) REFERENCES slots(id),
   FOREIGN KEY (patient_id) REFERENCES patients(id)
 );
+-- Only an active booking claims a slot. A cancelled booking keeps its
+-- history row without preventing the slot from being booked again.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bookings_confirmed_slot
+  ON bookings(slot_id)
+  WHERE status = 'CONFIRMED';

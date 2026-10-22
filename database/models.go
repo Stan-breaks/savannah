@@ -9,10 +9,11 @@ import (
 )
 
 type Booking struct {
-	ID        int64
-	Status    string
-	SlotID    int64
-	PatientID int64
+	ID           int64
+	Status       string
+	SlotID       int64
+	PatientID    int64
+	CancelReason sql.NullString
 }
 
 type Doctor struct {

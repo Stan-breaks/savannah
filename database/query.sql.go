@@ -33,19 +33,19 @@ func (q *Queries) AssignWorkingHoursToDoctor(ctx context.Context, arg AssignWork
 
 const cancelBooking = `-- name: CancelBooking :execrows
 UPDATE bookings
-SET status = 'CANCELLED'
+SET status = 'CANCELLED',
+    cancel_reason = ?
 WHERE id = ?
-  AND patient_id = ?
   AND status = 'CONFIRMED'
 `
 
 type CancelBookingParams struct {
-	ID        int64
-	PatientID int64
+	CancelReason sql.NullString
+	ID           int64
 }
 
 func (q *Queries) CancelBooking(ctx context.Context, arg CancelBookingParams) (int64, error) {
-	result, err := q.db.ExecContext(ctx, cancelBooking, arg.ID, arg.PatientID)
+	result, err := q.db.ExecContext(ctx, cancelBooking, arg.CancelReason, arg.ID)
 	if err != nil {
 		return 0, err
 	}
@@ -72,7 +72,7 @@ WHERE s.id = ?
       WHERE b.slot_id = s.id
         AND b.status = 'CONFIRMED'
   )
-RETURNING id, status, slot_id, patient_id
+RETURNING id, status, slot_id, patient_id, cancel_reason
 `
 
 type CreateBookingParams struct {
@@ -89,6 +89,7 @@ func (q *Queries) CreateBooking(ctx context.Context, arg CreateBookingParams) (B
 		&i.Status,
 		&i.SlotID,
 		&i.PatientID,
+		&i.CancelReason,
 	)
 	return i, err
 }
@@ -163,6 +164,35 @@ func (q *Queries) CreateSlot(ctx context.Context, arg CreateSlotParams) (Slot, e
 		&i.DoctorID,
 	)
 	return i, err
+}
+
+const createSlotIgnoringConflict = `-- name: CreateSlotIgnoringConflict :exec
+INSERT INTO slots (
+    start_time,
+    end_time,
+    date,
+    is_available,
+    doctor_id
+)
+VALUES (?, ?, ?, 1, ?)
+ON CONFLICT (doctor_id, date, start_time) DO NOTHING
+`
+
+type CreateSlotIgnoringConflictParams struct {
+	StartTime string
+	EndTime   string
+	Date      string
+	DoctorID  int64
+}
+
+func (q *Queries) CreateSlotIgnoringConflict(ctx context.Context, arg CreateSlotIgnoringConflictParams) error {
+	_, err := q.db.ExecContext(ctx, createSlotIgnoringConflict,
+		arg.StartTime,
+		arg.EndTime,
+		arg.Date,
+		arg.DoctorID,
+	)
+	return err
 }
 
 const createWorkingHours = `-- name: CreateWorkingHours :one
@@ -249,7 +279,7 @@ func (q *Queries) DeleteWorkingHours(ctx context.Context, id int64) error {
 
 const getAllBookings = `-- name: GetAllBookings :many
 SELECT
-    b.id, b.status, b.slot_id, b.patient_id,
+    b.id, b.status, b.slot_id, b.patient_id, b.cancel_reason,
     p.name AS patient_name,
     s.doctor_id,
     s.date,
@@ -262,15 +292,16 @@ ORDER BY s.date DESC, s.start_time DESC
 `
 
 type GetAllBookingsRow struct {
-	ID          int64
-	Status      string
-	SlotID      int64
-	PatientID   int64
-	PatientName string
-	DoctorID    int64
-	Date        string
-	StartTime   string
-	EndTime     string
+	ID           int64
+	Status       string
+	SlotID       int64
+	PatientID    int64
+	CancelReason sql.NullString
+	PatientName  string
+	DoctorID     int64
+	Date         string
+	StartTime    string
+	EndTime      string
 }
 
 func (q *Queries) GetAllBookings(ctx context.Context) ([]GetAllBookingsRow, error) {
@@ -287,6 +318,7 @@ func (q *Queries) GetAllBookings(ctx context.Context) ([]GetAllBookingsRow, erro
 			&i.Status,
 			&i.SlotID,
 			&i.PatientID,
+			&i.CancelReason,
 			&i.PatientName,
 			&i.DoctorID,
 			&i.Date,
@@ -492,7 +524,7 @@ func (q *Queries) GetAvailableSlotsByDoctorAndDate(ctx context.Context, arg GetA
 }
 
 const getBookingById = `-- name: GetBookingById :one
-SELECT id, status, slot_id, patient_id FROM bookings
+SELECT id, status, slot_id, patient_id, cancel_reason FROM bookings
 WHERE id = ? LIMIT 1
 `
 
@@ -504,12 +536,13 @@ func (q *Queries) GetBookingById(ctx context.Context, id int64) (Booking, error)
 		&i.Status,
 		&i.SlotID,
 		&i.PatientID,
+		&i.CancelReason,
 	)
 	return i, err
 }
 
 const getBookingBySlotId = `-- name: GetBookingBySlotId :one
-SELECT id, status, slot_id, patient_id FROM bookings
+SELECT id, status, slot_id, patient_id, cancel_reason FROM bookings
 WHERE slot_id = ?
   AND status = 'CONFIRMED'
 LIMIT 1
@@ -523,13 +556,59 @@ func (q *Queries) GetBookingBySlotId(ctx context.Context, slotID int64) (Booking
 		&i.Status,
 		&i.SlotID,
 		&i.PatientID,
+		&i.CancelReason,
+	)
+	return i, err
+}
+
+const getBookingWithSlot = `-- name: GetBookingWithSlot :one
+SELECT
+    b.id,
+    b.status,
+    b.slot_id,
+    b.patient_id,
+    b.cancel_reason,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+WHERE b.id = ?
+`
+
+type GetBookingWithSlotRow struct {
+	ID           int64
+	Status       string
+	SlotID       int64
+	PatientID    int64
+	CancelReason sql.NullString
+	DoctorID     int64
+	Date         string
+	StartTime    string
+	EndTime      string
+}
+
+func (q *Queries) GetBookingWithSlot(ctx context.Context, id int64) (GetBookingWithSlotRow, error) {
+	row := q.db.QueryRowContext(ctx, getBookingWithSlot, id)
+	var i GetBookingWithSlotRow
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.SlotID,
+		&i.PatientID,
+		&i.CancelReason,
+		&i.DoctorID,
+		&i.Date,
+		&i.StartTime,
+		&i.EndTime,
 	)
 	return i, err
 }
 
 const getBookingsByDoctorAndDate = `-- name: GetBookingsByDoctorAndDate :many
 SELECT
-    b.id, b.status, b.slot_id, b.patient_id,
+    b.id, b.status, b.slot_id, b.patient_id, b.cancel_reason,
     s.doctor_id,
     s.date,
     s.start_time,
@@ -550,15 +629,16 @@ type GetBookingsByDoctorAndDateParams struct {
 }
 
 type GetBookingsByDoctorAndDateRow struct {
-	ID          int64
-	Status      string
-	SlotID      int64
-	PatientID   int64
-	DoctorID    int64
-	Date        string
-	StartTime   string
-	EndTime     string
-	PatientName string
+	ID           int64
+	Status       string
+	SlotID       int64
+	PatientID    int64
+	CancelReason sql.NullString
+	DoctorID     int64
+	Date         string
+	StartTime    string
+	EndTime      string
+	PatientName  string
 }
 
 func (q *Queries) GetBookingsByDoctorAndDate(ctx context.Context, arg GetBookingsByDoctorAndDateParams) ([]GetBookingsByDoctorAndDateRow, error) {
@@ -575,6 +655,7 @@ func (q *Queries) GetBookingsByDoctorAndDate(ctx context.Context, arg GetBooking
 			&i.Status,
 			&i.SlotID,
 			&i.PatientID,
+			&i.CancelReason,
 			&i.DoctorID,
 			&i.Date,
 			&i.StartTime,
@@ -596,7 +677,7 @@ func (q *Queries) GetBookingsByDoctorAndDate(ctx context.Context, arg GetBooking
 
 const getBookingsByPatient = `-- name: GetBookingsByPatient :many
 SELECT
-    b.id, b.status, b.slot_id, b.patient_id,
+    b.id, b.status, b.slot_id, b.patient_id, b.cancel_reason,
     s.doctor_id,
     s.date,
     s.start_time,
@@ -608,14 +689,15 @@ ORDER BY s.date DESC, s.start_time DESC
 `
 
 type GetBookingsByPatientRow struct {
-	ID        int64
-	Status    string
-	SlotID    int64
-	PatientID int64
-	DoctorID  int64
-	Date      string
-	StartTime string
-	EndTime   string
+	ID           int64
+	Status       string
+	SlotID       int64
+	PatientID    int64
+	CancelReason sql.NullString
+	DoctorID     int64
+	Date         string
+	StartTime    string
+	EndTime      string
 }
 
 func (q *Queries) GetBookingsByPatient(ctx context.Context, patientID int64) ([]GetBookingsByPatientRow, error) {
@@ -632,10 +714,64 @@ func (q *Queries) GetBookingsByPatient(ctx context.Context, patientID int64) ([]
 			&i.Status,
 			&i.SlotID,
 			&i.PatientID,
+			&i.CancelReason,
 			&i.DoctorID,
 			&i.Date,
 			&i.StartTime,
 			&i.EndTime,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getBookingsWithSlotByDoctorAndDate = `-- name: GetBookingsWithSlotByDoctorAndDate :many
+SELECT
+    b.id,
+    b.status,
+    b.slot_id,
+    b.patient_id
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+WHERE s.doctor_id = ?
+  AND s.date = ?
+ORDER BY b.id
+`
+
+type GetBookingsWithSlotByDoctorAndDateParams struct {
+	DoctorID int64
+	Date     string
+}
+
+type GetBookingsWithSlotByDoctorAndDateRow struct {
+	ID        int64
+	Status    string
+	SlotID    int64
+	PatientID int64
+}
+
+func (q *Queries) GetBookingsWithSlotByDoctorAndDate(ctx context.Context, arg GetBookingsWithSlotByDoctorAndDateParams) ([]GetBookingsWithSlotByDoctorAndDateRow, error) {
+	rows, err := q.db.QueryContext(ctx, getBookingsWithSlotByDoctorAndDate, arg.DoctorID, arg.Date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetBookingsWithSlotByDoctorAndDateRow
+	for rows.Next() {
+		var i GetBookingsWithSlotByDoctorAndDateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.SlotID,
+			&i.PatientID,
 		); err != nil {
 			return nil, err
 		}
@@ -736,6 +872,76 @@ func (q *Queries) GetSlotsByDoctorAndDate(ctx context.Context, arg GetSlotsByDoc
 	return items, nil
 }
 
+const getUpcomingBookingsByPatient = `-- name: GetUpcomingBookingsByPatient :many
+SELECT
+    b.id,
+    b.status,
+    b.slot_id,
+    b.patient_id,
+    s.doctor_id,
+    s.date,
+    s.start_time,
+    s.end_time,
+    d.name AS doctor_name
+FROM bookings b
+JOIN slots s ON s.id = b.slot_id
+JOIN doctors d ON d.id = s.doctor_id
+WHERE b.patient_id = ?
+  AND b.status = 'CONFIRMED'
+  AND (s.date || ' ' || s.start_time) >= ?
+ORDER BY s.date ASC, s.start_time ASC
+`
+
+type GetUpcomingBookingsByPatientParams struct {
+	PatientID int64
+	Date      string
+}
+
+type GetUpcomingBookingsByPatientRow struct {
+	ID         int64
+	Status     string
+	SlotID     int64
+	PatientID  int64
+	DoctorID   int64
+	Date       string
+	StartTime  string
+	EndTime    string
+	DoctorName string
+}
+
+func (q *Queries) GetUpcomingBookingsByPatient(ctx context.Context, arg GetUpcomingBookingsByPatientParams) ([]GetUpcomingBookingsByPatientRow, error) {
+	rows, err := q.db.QueryContext(ctx, getUpcomingBookingsByPatient, arg.PatientID, arg.Date)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUpcomingBookingsByPatientRow
+	for rows.Next() {
+		var i GetUpcomingBookingsByPatientRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.SlotID,
+			&i.PatientID,
+			&i.DoctorID,
+			&i.Date,
+			&i.StartTime,
+			&i.EndTime,
+			&i.DoctorName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getWorkingHoursByDoctor = `-- name: GetWorkingHoursByDoctor :many
 SELECT wh.id, wh.day_of_week, wh.start_time, wh.end_time, wh.lunch_start, wh.lunch_end
 FROM working_hours wh
@@ -808,6 +1014,32 @@ type RemoveWorkingHoursFromDoctorParams struct {
 func (q *Queries) RemoveWorkingHoursFromDoctor(ctx context.Context, arg RemoveWorkingHoursFromDoctorParams) error {
 	_, err := q.db.ExecContext(ctx, removeWorkingHoursFromDoctor, arg.DoctorID, arg.WorkingHoursID)
 	return err
+}
+
+const rescheduleBooking = `-- name: RescheduleBooking :one
+UPDATE bookings
+SET slot_id = ?
+WHERE id = ?
+  AND status = 'CONFIRMED'
+RETURNING id, status, slot_id, patient_id, cancel_reason
+`
+
+type RescheduleBookingParams struct {
+	SlotID int64
+	ID     int64
+}
+
+func (q *Queries) RescheduleBooking(ctx context.Context, arg RescheduleBookingParams) (Booking, error) {
+	row := q.db.QueryRowContext(ctx, rescheduleBooking, arg.SlotID, arg.ID)
+	var i Booking
+	err := row.Scan(
+		&i.ID,
+		&i.Status,
+		&i.SlotID,
+		&i.PatientID,
+		&i.CancelReason,
+	)
+	return i, err
 }
 
 const updateSlotAvailability = `-- name: UpdateSlotAvailability :exec
