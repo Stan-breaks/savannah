@@ -66,6 +66,8 @@ Slots are stored in the database rather than generated for every availability re
 
 This simplifies availability queries and makes individual slots easy to book. The trade-off is that slots must be regenerated or adjusted when a doctor's schedule changes.
 
+The slots of a date are materialised on demand: whenever a schedule is consulted, the slots table is brought in line with the working hours, missing slots are inserted and slots that dropped out of the schedule are removed unless an appointment still refers to them.
+
 ### Shared working-hour schedules
 
 Working hours are separated from doctors through the `doctor_working_hours` junction table. This avoids duplicating identical schedules when several doctors follow the same timetable.
@@ -76,7 +78,7 @@ The trade-off is an additional join when retrieving a doctor's schedule. If sche
 
 A slot represents an appointment opportunity, while a booking represents a patient's reservation. Keeping them separate allows the system to preserve cancelled booking records without deleting the underlying slot.
 
-A unique constraint on `bookings.slot_id` prevents multiple booking records from claiming the same slot. The application must also manage slot availability consistently during booking and cancellation.
+A unique constraint on `bookings.slot_id` prevents multiple booking records from claiming the same slot. The application must also manage slot availability consistently during booking and cancellation. See section 9 for how this constraint had to change.
 
 ### Business rules in Go
 
