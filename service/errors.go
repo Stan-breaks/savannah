@@ -30,21 +30,15 @@ type Error struct {
 	Message string
 	// Kind is one of the Err constants above.
 	Kind error
-	// Cause is the underlying error, when there is one.
-	Cause error
 }
 
 func (e *Error) Error() string {
 	return e.Message
 }
 
-// Unwrap exposes both the failure kind and the underlying cause so that
-// errors.Is keeps working for either of them.
-func (e *Error) Unwrap() []error {
-	if e.Cause == nil {
-		return []error{e.Kind}
-	}
-	return []error{e.Kind, e.Cause}
+// Unwrap exposes the failure kind so that errors.Is keeps working.
+func (e *Error) Unwrap() error {
+	return e.Kind
 }
 
 // invalid reports a malformed request.
@@ -66,10 +60,4 @@ func conflict(code, format string, args ...any) *Error {
 // notFound reports a missing resource.
 func notFound(code, format string, args ...any) *Error {
 	return &Error{Code: code, Message: fmt.Sprintf(format, args...), Kind: ErrNotFound}
-}
-
-// withCause attaches the underlying error to a service error.
-func (e *Error) withCause(cause error) *Error {
-	e.Cause = cause
-	return e
 }
