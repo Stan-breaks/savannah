@@ -24,4 +24,6 @@ go build -o savannah .
 # that lost its data answers the same way.
 bash deploy/seed.sh
 
-sudo systemctl restart savannah.service
+# sudo -n, so that a missing sudoers rule fails the deployment straight
+# away instead of hanging on a password prompt that nobody can answer.
+sudo -n systemctl restart savannah.service

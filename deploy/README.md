@@ -73,7 +73,7 @@ Add these under **Settings → Secrets and variables → Actions**:
 | Name | Value |
 | --- | --- |
 | `DEPLOY_HOST` | The public address of the server. |
-| `DEPLOY_SSH_PORT` | The SSH port, usually `22`. |
+| `DEPLOY_SSH_PORT` | The port the server's sshd listens on. Check it with `sudo ss -lntp \| grep sshd`, it is not always `22`. |
 | `DEPLOY_USER` | `web`. |
 | `DEPLOY_SSH_KEY` | The private key printed by `install.sh`. |
 

@@ -54,9 +54,9 @@ fi
 install -m 0644 "$APP_DIR/deploy/savannah.service" /etc/systemd/system/savannah.service
 systemctl daemon-reload
 
-# The deploy script may restart the service, nothing else.
-SYSTEMCTL="$(command -v systemctl)"
-echo "web ALL=(root) NOPASSWD: $SYSTEMCTL restart savannah.service" > /etc/sudoers.d/savannah
+# The deploy script may restart the service, nothing else. The rule
+# names systemctl without a path, so it matches wherever it lives.
+echo "web ALL=(root) NOPASSWD: systemctl restart savannah.service" > /etc/sudoers.d/savannah
 chmod 0440 /etc/sudoers.d/savannah
 if command -v visudo >/dev/null; then
     visudo -c -f /etc/sudoers.d/savannah
@@ -91,7 +91,8 @@ echo "Done. Add these to the GitHub repository settings"
 echo "(Settings, Secrets and variables, Actions):"
 echo
 echo "  DEPLOY_HOST      the public address of this server"
-echo "  DEPLOY_SSH_PORT  the ssh port, usually 22"
+echo "  DEPLOY_SSH_PORT  the port sshd listens on, check it with:"
+echo "                   sudo ss -lntp | grep sshd"
 echo "  DEPLOY_USER      web"
 echo "  DEPLOY_SSH_KEY   the private key that matches the public key below"
 echo
