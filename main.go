@@ -70,8 +70,7 @@ func main() {
 	}
 
 	queries := database.New(db)
-	jwtSecret := os.Getenv("API_TOKEN")
-	route := router.NewRouter(queries, []byte(jwtSecret))
+	route := router.NewRouter(queries)
 
 	log.Println("savannah server started on :8080")
 	log.Fatal(http.ListenAndServe(":8080", route.Handler()))

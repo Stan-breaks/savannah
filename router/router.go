@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"savannah/database"
 	"savannah/router/apis"
-	"savannah/router/middleware"
 )
 
 type Router struct {
@@ -13,10 +12,9 @@ type Router struct {
 	mux       *http.ServeMux
 }
 
-func NewRouter(queries *database.Queries, jwtSecret []byte) *Router {
+func NewRouter(queries *database.Queries) *Router {
 	r := &Router{
 		queries:   queries,
-		jwtSecret: jwtSecret,
 		mux:       http.NewServeMux(),
 	}
 	r.setupRoutes()
@@ -24,18 +22,9 @@ func NewRouter(queries *database.Queries, jwtSecret []byte) *Router {
 }
 
 func (r *Router) setupRoutes() {
-	//serving static files
-	r.mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		http.FileServer(http.Dir("../static"))
-	})
-	// Auth
-	authHandler := apis.NewAuthApi(r.queries, r.jwtSecret)
-	r.mux.HandleFunc("/api/register", authHandler.Register)
-	r.mux.HandleFunc("/api/login", authHandler.Login)
 
-	// Protected
 	userHandler := apis.NewUserApi(r.queries)
-	r.mux.HandleFunc("/api/me", middleware.CheckAuth(userHandler.GetCurrentUser, r.jwtSecret))
+	r.mux.HandleFunc("/api/me",)
 }
 
 func (r *Router) Handler() http.Handler {
