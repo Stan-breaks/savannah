@@ -909,6 +909,7 @@ type GetUpcomingBookingsByPatientRow struct {
 	DoctorName string
 }
 
+// The Date parameter is the cutoff as a "YYYY-MM-DD HH:MM" timestamp.
 func (q *Queries) GetUpcomingBookingsByPatient(ctx context.Context, arg GetUpcomingBookingsByPatientParams) ([]GetUpcomingBookingsByPatientRow, error) {
 	rows, err := q.db.QueryContext(ctx, getUpcomingBookingsByPatient, arg.PatientID, arg.Date)
 	if err != nil {
