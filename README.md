@@ -298,3 +298,4 @@ CREATE UNIQUE INDEX idx_bookings_confirmed_slot
 Two decisions were mine. First, the `slots` table is built from working hours, and the availability endpoint writes to it. The alternative was computing slots on every request and storing only bookings. I went the other way because a schedule change shouldn't leave a bookable slot behind, and the cost is a few inserts. Second, booking takes a doctor, date and start time instead of a slot id. Slots get deleted and recreated when schedules change, so a client holding a slot id can end up asking for something that no longer exists. Naming the doctor and the time is what the patient actually means.
 
 [ADD: one thing you'd do differently with more time, such as the missing auth or the write-on-read availability endpoint.]
+
