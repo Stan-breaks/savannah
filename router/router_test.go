@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"savannah/database"
+	"savannah/router/apis"
 	"savannah/service"
 	"testing"
 	"time"
@@ -485,6 +486,25 @@ func TestPatientAppointmentsEndpointReportsFailures(t *testing.T) {
 	}
 }
 
+func TestRootEndpointDescribesTheAPI(t *testing.T) {
+	r, _, _, _ := newTestRouter(t)
+
+	recorder := call(t, r, http.MethodGet, "/", nil)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (body: %s)", recorder.Code, http.StatusOK, recorder.Body)
+	}
+	body := decode(t, recorder)
+	if body["live_url"] != apis.LiveURL {
+		t.Errorf("live_url = %v, want %s", body["live_url"], apis.LiveURL)
+	}
+	if body["docs"] == nil || body["docs"] == "" {
+		t.Errorf("body = %v, want a docs link", body)
+	}
+	if endpoints, ok := body["endpoints"].([]any); !ok || len(endpoints) == 0 {
+		t.Errorf("body = %v, want a list of endpoints", body)
+	}
+}
+
 func TestUnknownRoutesAndMethodsAnswerWithJSON(t *testing.T) {
 	r, _, _, _ := newTestRouter(t)
 
@@ -492,6 +512,20 @@ func TestUnknownRoutesAndMethodsAnswerWithJSON(t *testing.T) {
 		recorder := call(t, r, http.MethodGet, "/nope", nil)
 		if recorder.Code != http.StatusNotFound {
 			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+		}
+		body := decode(t, recorder)
+		if body["code"] != "not_found" || body["error"] == nil || body["error"] == "" {
+			t.Errorf("body = %v, want a JSON not_found error", body)
+		}
+	})
+
+	t.Run("an unknown route with another method", func(t *testing.T) {
+		recorder := call(t, r, http.MethodPost, "/nope", nil)
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+		}
+		if body := decode(t, recorder); body["code"] != "not_found" {
+			t.Errorf("body = %v, want a JSON not_found error", body)
 		}
 	})
 

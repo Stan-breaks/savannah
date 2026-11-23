@@ -25,6 +25,10 @@ func (r *Router) setupRoutes() {
 	doctors := apis.NewDoctorApi(r.svc)
 	patients := apis.NewPatientApi(r.svc)
 
+	// A small entry point for the root, and a JSON 404 for anything else.
+	r.mux.HandleFunc("GET /{$}", apis.Root)
+	r.mux.HandleFunc("/", apis.NotFound)
+
 	// Appointments
 	r.mux.HandleFunc("POST /appointments", appointments.Book)
 	r.mux.HandleFunc("PATCH /appointments/{id}/cancel", appointments.Cancel)
